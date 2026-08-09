@@ -58,6 +58,8 @@ psql "$DATABASE_URL" -f supabase/reset.sql # destructive demo reset only
 
 `.github/workflows/ci.yml` installs Node from `.nvmrc`, installs the manifest, then runs typecheck, lint, tests, and the production build on pushes and pull requests. `vercel.json` declares a Next.js build and install command. Import this directory into Vercel and configure the variables in `.env.example`; no deployment URL is claimed without a verified deployment.
 
+This project intentionally uses a lockless `npm install` contract until a reviewed lockfile is introduced. Workflows therefore do not request npm cache configuration, which would make `setup-node` fail before installation when no `package-lock.json` exists.
+
 Model configuration: leave `EXTRACTION_PROVIDER=mock` for a credential-free demo, or set `EXTRACTION_PROVIDER=openai`, `OPENAI_API_KEY`, and optional `OPENAI_MODEL`. Delivery configuration: leave the mock provider in demo mode, or set `OUTBOUND_EMAIL_PROVIDER=webhook`, `OUTBOUND_EMAIL_WEBHOOK_URL`, and `OUTBOUND_EMAIL_WEBHOOK_SECRET` after verifying the receiving service.
 
 ## Scope boundary
