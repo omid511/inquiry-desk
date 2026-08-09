@@ -21,7 +21,7 @@ export function mockExtract(request: string, schema: InquirySchemaConfig = { id:
   ]);
   const service = requestedService || (normalized.includes("repair") ? "Repair" : normalized.includes("lesson") ? "Lesson" : "");
   const timeWindow = findMatch(request, [/(?:on|for|around|this)\s+((?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|week|month)[^,.;!?\n]*)/i, /(?:available|availability|time)\s*(?:is|:)?\s*([^.!?\n]{3,80})/i]);
-  const location = findMatch(request, [/(?:in|at|near|from)\s+([A-Z][^.!?\n]{2,60})/i, /(?:location|address)\s*(?:is|:)?\s*([^.!?\n]{3,80})/i]);
+  const location = findMatch(request, [/\b(?:in|at|near|from)\b\s+([A-Z][^.!?\n]{2,60})/i, /(?:location|address)\s*(?:is|:)?\s*([^.!?\n]{3,80})/i]);
   const urgency: ExtractedInquiry["urgency"] = /(urgent|asap|today|emergency|immediately)/i.test(request) ? "high" : /(next month|no rush|whenever)/i.test(request) ? "low" : "normal";
   const missingFields: ExtractedInquiry["missingFields"] = [];
   if (schema.requiredFields.includes("requestedService") && !service) missingFields.push("requestedService");
