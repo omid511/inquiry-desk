@@ -1,0 +1,2 @@
+import { NextResponse } from "next/server";
+export function GET() { const demo = process.env.DEMO_MODE === "true"; return NextResponse.json({ ok: true, service: "inquiry-desk", mode: process.env.EXTRACTION_PROVIDER === "openai" && process.env.OPENAI_API_KEY ? "provider" : "deterministic", persistence: process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY ? "supabase" : demo ? "demo-memory" : "not-configured", at: new Date().toISOString() }); }

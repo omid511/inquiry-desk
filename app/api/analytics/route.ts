@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/http";
+import { requireOwner } from "@/lib/security";
+import { getStore } from "@/lib/store";
+export async function GET() { try { const session = await requireOwner(); const leads = await getStore().list(session.workspaceId); const byStatus = Object.fromEntries([...new Set(leads.map((lead) => lead.status))].map((status) => [status, leads.filter((lead) => lead.status === status).length])); const byCategory = Object.fromEntries([...new Set(leads.map((lead) => lead.extracted.category))].map((category) => [category, leads.filter((lead) => lead.extracted.category === category).length])); const overdue = leads.filter((lead) => !["closed", "sent"].includes(lead.status) && Date.parse(lead.slaDueAt) < Date.now()).length; const averageConfidence = leads.length ? leads.reduce((sum, lead) => sum + lead.extracted.confidence, 0) / leads.length : 0; return NextResponse.json({ total: leads.length, byStatus, byCategory, overdue, averageConfidence }); } catch (error) { return errorResponse(error); } }

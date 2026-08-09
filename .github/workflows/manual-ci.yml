@@ -1,0 +1,13 @@
+name: Manual verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why is this verification being run?
+        required: false
+        type: string
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml

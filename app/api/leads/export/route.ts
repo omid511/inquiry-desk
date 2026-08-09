@@ -1,0 +1,4 @@
+import { errorResponse } from "@/lib/http";
+import { requireOwner } from "@/lib/security";
+import { getStore } from "@/lib/store";
+export async function GET() { try { const session = await requireOwner(); const leads = await getStore().list(session.workspaceId); const header = "id,created_at,name,email,status,category,service,confidence,assigned_to,outcome\n"; const rows = leads.map((lead) => [lead.id, lead.createdAt, lead.name, lead.email, lead.status, lead.extracted.category, lead.extracted.requestedService, lead.extracted.confidence, lead.assignedTo || "", lead.outcome].map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n"); return new Response(header + rows + "\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=inquiry-desk-export.csv", "cache-control": "no-store" } }); } catch (error) { return errorResponse(error); } }

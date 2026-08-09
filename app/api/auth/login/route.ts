@@ -1,0 +1,4 @@
+import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/http";
+import { createOwnerSession, OWNER_COOKIE, sessionMaxAge, validOwnerPassword } from "@/lib/security";
+export async function POST(request: Request) { try { const body = await request.json().catch(() => ({})); if (typeof body.password !== "string" || !validOwnerPassword(body.password)) return NextResponse.json({ error: "Invalid access code" }, { status: 401 }); const session = await createOwnerSession(); const response = NextResponse.json({ ok: true, workspaceId: session.workspaceId }); response.cookies.set(OWNER_COOKIE, session.token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: sessionMaxAge, path: "/" }); return response; } catch (error) { return errorResponse(error); } }

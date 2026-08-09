@@ -1,0 +1,7 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { errorResponse } from "@/lib/http";
+import { requireOwner } from "@/lib/security";
+import { getStore, statusEvent } from "@/lib/store";
+const messageInput = z.object({ body: z.string().trim().min(1).max(4000), channel: z.enum(["email", "internal"]).default("internal"), direction: z.enum(["outbound", "inbound"]).default("outbound") });
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) { try { const session = await requireOwner(); const body = messageInput.parse(await request.json()); const store = getStore(); const lead = await store.get(session.workspaceId, (await params).id); if (!lead) return NextResponse.json({ error: "Inquiry not found" }, { status: 404 }); const message = { id: crypto.randomUUID(), body: body.body, channel: body.channel, direction: body.direction, createdAt: new Date().toISOString(), createdBy: session.userId }; const updated = { ...lead, messages: [...lead.messages, message], updatedAt: message.createdAt, events: [...lead.events, statusEvent("message_added", session.userId, `${body.direction} ${body.channel} message added`)] }; await store.save(updated); return NextResponse.json({ lead: updated, message }); } catch (error) { if (error instanceof Error && error.name === "ZodError") return NextResponse.json({ error: "Invalid message" }, { status: 400 }); return errorResponse(error); } }

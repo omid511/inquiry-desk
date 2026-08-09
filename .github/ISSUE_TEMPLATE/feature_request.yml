@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a bounded improvement to inquiry operations.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Keep proposals aligned with human review, explicit approval, and privacy boundaries.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who is blocked, and what is the smallest useful outcome?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Workflow, privacy, or delivery risks
+    validations:
+      required: true
