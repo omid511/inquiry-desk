@@ -10,34 +10,48 @@ Inquiry Desk is a single web intake channel for small service teams. A visitor s
 visitor -> /api/intake -> validation/rate/idempotency -> extractor provider
                                       |                  -> structured fields + run
                                       v
-                             repository adapter
+                             InquiryStore boundary
                                       |
-operator session -> owner APIs -> queue/detail -> approve/reject -> send/retry -> close/reopen
-                                      |                 |             |
-                                      +-> messages      +-> delivery  +-> audit events
+Supabase Auth cookie -> server auth adapter -> membership -> owner APIs -> queue/detail -> workflow
+                                                                      |                    |
+                                                                      +-> inquiries         +-> inquiry_events
 ```
 
-The Next.js App Router owns UI and request boundaries. `lib/domain.ts` defines the domain vocabulary and Zod contracts. `lib/workflow.ts` is the single transition guard. `lib/extraction.ts` exposes an injectable provider interface with a deterministic fallback. `lib/delivery.ts` exposes mock and webhook delivery providers; mock delivery is explicit and never described as external delivery.
+The Next.js App Router owns UI and request boundaries. `lib/domain.ts` defines domain vocabulary and Zod contracts. `lib/workflow.ts` is the single transition guard. `lib/extraction.ts` exposes an injectable provider interface with a deterministic fallback. `lib/delivery.ts` exposes mock and webhook delivery providers; mock delivery is explicit and never described as external delivery.
 
-## Trust and authorization boundaries
+## Demo and persisted modes
 
-- Public intake may create only a new inquiry in the configured public workspace. It cannot read or mutate owner records.
-- Login validates the configured access token, creates an opaque server-side session, and writes only the session token to an HTTP-only cookie.
-- Owner APIs load the session from the repository, re-check its workspace membership, and derive workspace/user/role from that record. Request bodies cannot choose an actor or tenant.
-- Supabase uses a service-role server adapter. Browser clients do not receive the service-role key. RLS is enabled in the migration; workspace-scoped policies must be reviewed before direct client access.
-- Inbound webhooks require a configured workspace, HMAC-SHA256 signature, and email/lead match. Outbound webhooks carry a secret and delivery idempotency key.
-- Logs use bounded error messages and do not intentionally include inquiry bodies, prompts, model output, or secrets. Retention deletes a lead and cascading child records after the configured age.
+`DEMO_MODE=true` is an explicit, account-free mode. `getStore()` selects the isolated in-memory store before examining Supabase variables, so demo writes cannot reach production tables. Demo login remains the `demo` access code unless overridden by `OWNER_ACCESS_TOKEN`.
 
-## Persistence model
+`DEMO_MODE=false` requires Supabase URL/publishable key and uses a new SSR client per request. Supabase Auth owns the session; middleware refreshes cookies, and server routes call `auth.getUser()` before workspace access. The service-role client exists only in `lib/auth.ts` for idempotently creating/linking `app_users`, `auth_identities`, and default memberships. It is never imported by UI code or bundled into browser code.
 
-`InquiryStore` is the application seam. `InMemoryInquiryStore` exists only when `DEMO_MODE=true`. With Supabase URL and service-role key configured, `SupabaseInquiryStore` stores the lead payload plus normalized child records:
+Persisted intake is authenticated-only in this slice. The demo remains the recruiter-facing public intake. Anonymous production intake, CAPTCHA/rate limiting beyond the current process guard, and provider-side Auth configuration require a later reviewed slice.
 
-- `workspaces`, `memberships`, `sessions`
-- `inquiry_leads`, `inquiry_messages`
-- `extraction_runs`, `inquiry_drafts`
-- `delivery_attempts`, `idempotency_keys`, `audit_events`
+## Portable persistence model
 
-`supabase/schema.sql` creates the tables and indexes; `seed.sql` creates the demo workspace membership; `reset.sql` is a destructive demo reset. Production identity provisioning should replace the single configured owner token with a real identity provider and membership management.
+The migration source of truth is `supabase/migrations/202608110001_inquiry_persistence.sql`; `supabase/schema.sql` is a clean-install reference copy. The domain tables are:
+
+- `app_users`: internal application identity, independent of Supabase Auth IDs.
+- `auth_identities`: `(provider, subject)` mapping; currently the narrow `supabase` adapter.
+- `workspaces`: tenant boundary and inquiry schema configuration.
+- `workspace_memberships`: protected workspace role relation (`owner`, `manager`, `operator`, `viewer`).
+- `inquiries`: existing `InquiryLead` payload plus indexed tenant/status/idempotency/fingerprint columns.
+- `inquiry_events`: append-oriented audit rows with tenant, target, action, actor, detail, metadata, and UTC timestamp.
+
+The JSON payload preserves current domain semantics while the relational columns support bounded queue queries and database constraints. Provider IDs do not become domain IDs. Realtime, Edge Functions, Storage, and direct database credentials are out of scope.
+
+## Authorization matrix
+
+| Resource/operation | Anonymous | Viewer | Operator | Manager/owner |
+| --- | --- | --- | --- | --- |
+| Read own workspace | denied | allowed | allowed | allowed |
+| Create/update inquiry | denied | denied | allowed | allowed |
+| Delete inquiry | denied | denied | denied | allowed |
+| Read audit events | denied | allowed | allowed | allowed |
+| Append audit event | denied | denied | allowed | allowed |
+| Change membership/role | denied | denied | denied | owner only |
+
+The application checks the verified Auth session and membership for UX and role errors. RLS repeats tenant membership and role checks using protected tables. Policies use `USING` for visible/targetable rows and `WITH CHECK` for writes. The only `SECURITY DEFINER` functions are private, fixed-search-path RLS adapter helpers needed to avoid recursive membership policies; their execute privileges are restricted to `authenticated`.
 
 ## Workflow state machine
 
@@ -49,8 +63,14 @@ delivery_failed -> sending
 sent/approved/rejected/delivery_failed -> closed -> drafting
 ```
 
-Every transition is server-guarded and appends an immutable audit event. A delivery attempt is keyed by lead, draft version, and an optional caller idempotency key; a previously sent key returns without sending twice. A provider exception is converted into `delivery_failed` with an error and retryable attempt count.
+Every transition is server-guarded and appends an immutable event. A delivery attempt is keyed by lead, draft version, and an optional caller idempotency key; a previously sent key returns without sending twice.
 
-## Operational checks
+## Operational checks and rollback
 
-The public CI workflow runs install, typecheck, lint, tests, and build. CodeQL scans JavaScript/TypeScript, and dependency review checks pull-request changes. Dependabot watches npm and GitHub Actions. The manual workflow reruns CI on demand. Tag releases run typecheck/tests and publish a source tarball as both an artifact and GitHub release asset. Workflow actions use maintained major tags (`@v4`/`@v3`) so security fixes receive upstream updates without pinning to abandoned action lines; review or pin immutable SHAs when the repository adopts a stricter supply-chain policy. Each workflow grants only the permissions it needs. See `README.md`, `CONTRIBUTING.md`, and `SECURITY.md` for operator and contributor procedures.
+CI runs typecheck, lint, unit tests, build, migration contract validation, and a local Supabase/pgTAP RLS suite. The RLS fixtures cover anonymous denial, cross-workspace reads/writes, forged workspace IDs, invalid role changes, viewer denial, and allowed owner/operator cases. If Docker/Supabase CLI is unavailable locally, `npm run db:validate` still checks the migration contract and `npm run db:test` reports the exact skipped database test.
+
+The migration is additive on a clean project and has no destructive data backfill. Apply it before switching persisted application traffic; seed only local/non-production. For rollback, deploy the previous app against the additive tables; use a forward migration for policy/schema corrections rather than dropping tenant data. Retention deletes inquiries and cascaded events only through the owner endpoint.
+
+## Portability and provider-side work
+
+Business services consume `InquiryStore` and domain objects, not PostgREST response shapes. Supabase-specific Auth/session and RLS identity code is isolated under `lib/supabase` and `lib/auth.ts`. An exit requires ordinary PostgreSQL schema/data export, replacing the Auth identity provider and session adapter, then validating row counts, foreign keys, audit history, and authorization. Production Auth email confirmation, redirect allowlists, SMTP, CAPTCHA/rate limits, MFA, separate projects/credentials, network restrictions, and advisor review remain unverified operator actions.

@@ -1,0 +1,13 @@
+project_id = "inquiry-desk"
+
+[db]
+major_version = 15
+
+[api]
+enabled = true
+schemas = ["public", "graphql_public"]
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000"]

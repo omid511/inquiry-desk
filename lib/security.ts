@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { ensureApplicationUser, getAuthenticatedUser } from "./auth";
 import { getStore, type UserSession } from "./store";
 
 const OWNER_COOKIE = "inquiry_owner_session";
@@ -17,6 +18,16 @@ export function isRateLimited(key: string, limit = 8) {
 }
 
 export async function getOperatorSession(): Promise<UserSession | null> {
+  if (!isDemoMode()) {
+    const user = await getAuthenticatedUser();
+    if (!user) return null;
+    const appUser = await ensureApplicationUser(user);
+    const workspaceId = process.env.DEFAULT_WORKSPACE_ID || process.env.PUBLIC_WORKSPACE_ID;
+    if (!workspaceId) return null;
+    const membership = await getStore().getMembership(appUser.id, workspaceId);
+    if (!membership) return null;
+    return { token: randomUUID(), userId: appUser.id, workspaceId: membership.workspaceId, role: membership.role, expiresAt: new Date(Date.now() + sessionMaxAge * 1000).toISOString() };
+  }
   const value = (await cookies()).get(OWNER_COOKIE)?.value;
   if (!value) return null;
   const session = await getStore().getSession(value);

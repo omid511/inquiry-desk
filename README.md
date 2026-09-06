@@ -42,21 +42,28 @@ Inbound email/webhook threading is exposed at `POST /api/webhooks/inquiry`. It r
 
 ## Persistence, auth, and privacy
 
-Set `DEMO_MODE=false`, `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_ACCESS_TOKEN`, `OWNER_USER_ID`, and `OWNER_WORKSPACE_ID` for a non-demo deployment. Seed a matching membership. The repository boundary in `lib/store.ts` then uses Supabase and persists workspaces, memberships, opaque server-side sessions, inquiries, messages, schema/extracted data, extraction runs, drafts, delivery attempts, idempotency keys, and audit events. The owner API derives workspace and role from the server-side session; request bodies cannot select a workspace or actor.
+Demo mode is the default and wins over any accidentally present Supabase variables. Its in-memory store is process-local and cannot write Supabase. Persisted mode requires `DEMO_MODE=false`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (or legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY`), and server-only `SUPABASE_SERVICE_ROLE_KEY`. The browser never receives the service-role key.
 
-Apply the schema and seed data with the Supabase SQL editor, Supabase CLI, or your migration runner:
+Persisted mode uses Supabase Auth email/password sign-in, sign-up, and sign-out with SSR-safe HTTP-only session cookies. A successful sign-in idempotently links the provider subject to an internal `app_users` record in `auth_identities`; a configured `DEFAULT_WORKSPACE_ID` receives a viewer membership for new accounts. Promote trusted operators by changing the protected membership row through a reviewed migration/admin process. The server derives workspace, actor, and role from the verified session and membership; request bodies cannot select them.
+
+The portable domain boundary is `app_users`, `auth_identities`, `workspaces`, `workspace_memberships`, `inquiries`, and append-only `inquiry_events`. Inquiry payloads retain the existing domain semantics while tenant, status, idempotency, fingerprint, and audit rows are queryable and indexed. Every business table has RLS and operation-specific policies. Persisted intake is authenticated-only in this slice; anonymous intake remains available in the account-free demo.
+
+Apply migrations and local seed data with the Supabase CLI:
 
 ```bash
-supabase db push                         # applies supabase/schema.sql when configured
-psql "$DATABASE_URL" -f supabase/seed.sql
-psql "$DATABASE_URL" -f supabase/reset.sql # destructive demo reset only
+supabase db push                         # applies supabase/migrations/
+supabase db reset                        # local only; applies seed.sql
+npm run db:validate                      # credential-free migration contract check
+npm run db:test                          # local reset + pgTAP RLS tests when CLI/Docker exist
 ```
 
-`RETENTION_DAYS` defaults to 365 and the owner-only retention endpoint deletes old inquiries with cascading related records. Before production, add workspace-scoped RLS policies, a real identity provider mapping, a shared rate limiter, deletion/export request handling, and a reviewed privacy notice.
+`supabase/schema.sql` is a clean-install reference copy; the ordered migration is the deployment source of truth. `supabase/seed.sql` is non-production only. `supabase/reset.sql` is a destructive local reset for inquiry data. `RETENTION_DAYS` defaults to 365 and the owner-only retention endpoint deletes old inquiries with cascading events. Review Supabase Auth email confirmation, redirect allowlists, CAPTCHA/rate limits, SMTP, MFA for privileged operators, network restrictions, and Security/Performance Advisor findings before production. These provider-side settings are not verified by this repository.
+
+The database exit path is ordinary PostgreSQL schema/data export plus a separate Supabase Auth identity migration. Supabase-specific `auth.uid()` usage is isolated in `private` RLS adapter functions; Realtime, Edge Functions, Storage, and speculative provider abstractions are intentionally out of scope.
 
 ## CI/CD and Vercel
 
-`.github/workflows/ci.yml` installs Node from `.nvmrc`, installs the manifest, then runs typecheck, lint, tests, and the production build on pushes and pull requests. `vercel.json` declares a Next.js build and install command. Import this directory into Vercel and configure the variables in `.env.example`; no deployment URL is claimed without a verified deployment.
+`.github/workflows/ci.yml` installs Node from `.nvmrc`, runs typecheck, lint, unit tests, migration contract validation, and the production build, plus a credential-free local Supabase/pgTAP RLS job using Docker. `vercel.json` declares a Next.js build and install command. Import this directory into Vercel and configure the variables in `.env.example`; no deployment URL is claimed without a verified deployment.
 
 This project intentionally uses a lockless `npm install` contract until a reviewed lockfile is introduced. Workflows therefore do not request npm cache configuration, which would make `setup-node` fail before installation when no `package-lock.json` exists.
 
